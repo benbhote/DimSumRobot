@@ -38,6 +38,8 @@ When no devices are connected to the robot (and only one can be connected at a t
 - Battery LiPo 3.7 500mAh 902030
 
 # Known issues :
+_Important to note that with the current configuration, no more GPIO pin are available to put another sensor (except an I2C one's that will be added on the bus with the MPU and SHT40 sensors)._
+- Microphone available on the sense module isn't activated because its GPIOs are needed elsewhere.
 - Currently, the self-balancing isn't properly working and the robot will move with its bottom touching the floor.
 - If the robot is on for extended period of time (more than 30min I'd say), the warmth emit by the ESP32-S3 is building up inside the chassis and mainly going out through the SHT40 slit and impacting the data read by it.
 - Depending on how well the wheels are fixed, the robot will not go straight forward.
