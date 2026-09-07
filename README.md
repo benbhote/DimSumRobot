@@ -1,7 +1,7 @@
 # DimSumRobot
 This is a personal project of a miniature robot based on a ESP32-S3 microchip.
 
-The original aim was to have a RC robot (from a webpage) with the possibility to plug it on an Astronomical telescope Hadley (more about it here : https://www.printables.com/model/224383-astronomical-telescope-hadley-an-easy-assembly-hig).
+The original aim was to have a RC robot (from a webpage) with the possibility to plug it on an astronomical telescope Hadley (more about it here : https://www.printables.com/model/224383-astronomical-telescope-hadley-an-easy-assembly-hig).
 But with the actual focuser on my Hadley, the camera sensor is too far from the mirror (I need to explore a solution based on a Barlow lens to solve this problem).
 
 Nonetheless, the project is still really fun because of all the other dimensions of the robot :
