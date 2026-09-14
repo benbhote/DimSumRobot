@@ -37,6 +37,10 @@ When no devices are connected to the robot (and only one can be connected at a t
 - Grove Temperature & Humidity Sensor(SHT40)
 - Battery LiPo 3.7 500mAh 902030
 
+You can consult pin mapping of the ESP32-S3 [here](./PINOUT.md).
+
+For the schematic, please consult KiCad folder.
+
 # Known issues :
 _Important to note that with the current configuration, no more GPIO pin are available to put another sensor (except an I2C one's that will be added on the bus with the MPU and SHT40 sensors)._
 - Microphone available on the sense module isn't activated because its GPIOs are needed elsewhere.
