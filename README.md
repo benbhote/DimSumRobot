@@ -49,5 +49,5 @@ _Important to note that with the current configuration, no more GPIO pin are ava
 - Adding conditional compilation to adapt the code depending on the components inside the robot
 
 # Changelog :
-- 2026-09-06 : Creating the repository
 - 2026-09-14 : Adding KiCad files
+- 2026-09-06 : Creating the repository
