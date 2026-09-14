@@ -30,7 +30,7 @@ When no devices are connected to the robot (and only one can be connected at a t
 - Seeed Studio XIAO ESP32-S3 Sense
 - OV3660 Camera sensor (68°)
 - DollaTek TB6612FNG
-- MT2608 DC-DC boost
+- MT3608 DC-DC boost
 - 2 N20 motors 6V 300 RPM
 - ARCELI GY-521 MPU6050
 - Grove Ultrasonic Ranger
