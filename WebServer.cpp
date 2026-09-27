@@ -86,8 +86,12 @@ void configWebServer(AsyncWebServer &server) {
       json += "\"sd\":" + String(statusSD ? "true" : "false") + ",";
       json += "\"mpu\":" + String(statusMPU ? "true" : "false") + ",";
       json += "\"sht40\":" + String(statusSHT40 ? "true" : "false") + ",";
-      json += "\"radar\":" + String(statusRadar ? "true" : "false")+ ",";
-      json += "\"modeEquilibrium\":" + String(modeEquilibrium ? "true" : "false");
+      json += "\"radar\":" + String(statusRadar ? "true" : "false") + ",";
+      json += "\"modeEquilibrium\":" + String(modeEquilibrium ? "true" : "false") + ",";
+      json += "\"statusADS1115\":" + String(statusADS1115 ? "true" : "false") + ",";
+      json += "\"batteryVoltage\":" + String(batteryVoltage, 2) + ",";
+      json += "\"batteryPercent\":" + String(batteryPercent) + ",";
+      json += "\"batteryLowSafety\":" + String(batteryLowSafety ? "true" : "false");
       json += "}";
     request->send(200, "application/json", json);
   });
@@ -109,7 +113,7 @@ void configWebServer(AsyncWebServer &server) {
             .btn:active { background: #005999; }
             .btn-danger { background: #d9534f; }
             .btn:disabled { background-color: #555 !important; color: #999 !important; cursor: not-allowed; opacity: 0.6; }
-            .nav-bar { margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+            .nav-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 10px; }
             .sensor-box { background: #1e1e1e; margin: 10px auto; padding: 8px; max-width: 480px; border-radius: 5px; font-size: 14px; border: 1px solid #333; }
             .error-text { color: #ff4d4d; font-weight: bold; }
             .file-row { display: flex; justify-content: space-between; align-items: center; background: #1e1e1e; margin: 5px auto; padding: 8px; max-width: 400px; border-radius: 4px; }
@@ -121,16 +125,23 @@ void configWebServer(AsyncWebServer &server) {
 
         <body>
           <div class="nav-bar">
-            <button id="nav-diag" class="btn" onclick="switchView('diagnostic'); fetch('/sd-stats');">Diagnostic</button>
-            <button id="nav-obs" class="btn" onclick="switchView('observation'); fetch('/observation');">Observation</button>
-            <button id="nav-expl" class="btn" onclick="switchView('exploration'); fetch('/exploration');">Exploration</button>
-            <button id="nav-gallery" class="btn" onclick="switchView('files'); fetch('/gallery');">Gallery SD</button>
+            <button id="nav-diag" class="btn" onclick="navigateTo('diagnostic', 'diagnostic')">Diagnostic</button>
+            <button id="nav-obs" class="btn" onclick="navigateTo('observation', 'observation')">Observation</button>
+            <button id="nav-expl" class="btn" onclick="navigateTo('exploration', 'exploration')">Exploration</button>
+            <button id="nav-gallery" class="btn" onclick="navigateTo('files', 'gallery')">Gallery SD</button>
+            <div id="nav-battery" style="margin-left: auto; padding: 8px 12px; background: #222; color: #fff; border-radius: 4px; font-weight: bold; font-size: 14px; display: inline-flex; align-items: center; gap: 4px;">
+              Bat: <span id="voltage">--</span> V | <span id="BatPercent" style="padding: 2px 5px; border-radius: 3px;">--</span>
+            </div>
           </div>
 
           <!-- Global sensors box -->
           <div id="global-sensor-box" class="sensor-box" style="margin: 10px auto; max-width: 480px; text-align: center;">
             Temperature : <span id="temp">--</span> °C | Humidity : <span id="hum">--</span> %
           </div>
+
+          <!Battery warning message -->
+          <div id="battery-unknown-warning" class="warning-box">Battery state unknown (ADS1115 not responding).</div>
+          <div id="battery-low-warning" class="warning-box">Battery too low. Go feed it !</div>
 
           <!-- VUE 0 : DIAGNOSTIC (default) -->
           <div id="view-diagnostic" class="view active">
@@ -166,7 +177,7 @@ void configWebServer(AsyncWebServer &server) {
             <h2>Exploration mode</h2>
             <div id="radar-warning" class="warning-box">Caution : radar malfunctioning !</div>
             <div style="margin-top: 15px;">
-              <button class="btn" onclick="toggleStream()">Start / Stop Stream</button>
+              <button id="btn-stream" class="btn" onclick="toggleStream()">Start / Stop Stream</button>
               <button id="btn-motors-mode" class="btn" style="background: #e67e22;" onclick="toggleMotorsMode()">Stabilisation : OFF</button>
             </div>
 
@@ -214,7 +225,7 @@ void configWebServer(AsyncWebServer &server) {
 
             // Auto launch web page loads
             window.onload = function() {
-              verifyDiagAndSafety();
+              navigateTo('diagnostic', 'diagnostic');
               initWebSocket();
 
               // --- Real time connection to events of ESP32 (SSE) ---
@@ -222,19 +233,29 @@ void configWebServer(AsyncWebServer &server) {
                 const source = new EventSource('/events');
 
                 source.addEventListener('system_state', function(e) {
-                  if (e.data === "mpu_ko") {
-                    console.warn("[UI] Critical alert : MPU malfuctioning !");
-                    
-                    let btnMotorsMode = document.getElementById('btn-motors-mode');
-                    if (btnMotorsMode) {
-                      btnMotorsMode.innerText = "Safety : Motors only";
-                      btnMotorsMode.disabled = true;
-                      btnMotorsMode.style.background = "#555";
-                    }
+                      if (e.data === "battery_low_safety") {
+                        console.warn("[UI] Battery safety activated !");
+                        navigateTo('diagnostic', 'diagnostic');
+                        verifyDiagAndSafety();
+                      } 
+                      else if (e.data === "mpu_ko") {
+                        console.warn("[UI] Critical alert : MPU malfunctioning !");
+                        let btnMotorsMode = document.getElementById('btn-motors-mode');
+                        if (btnMotorsMode) {
+                          btnMotorsMode.innerText = "Safety : Motors only";
+                          btnMotorsMode.disabled = true;
+                          btnMotorsMode.style.background = "#555";
+                        }
+                        verifyDiagAndSafety();
+                      }
+                      else if (e.data === "photo_failed") {
+                        console.warn("[UI] Failed to save file onto SDcard !");
+                        alert("Error : failed to save file onto SD card.");
+                      }
+                    }, false);
                   }
-                }, false);
-              }
-            };
+                  setInterval(verifyDiagAndSafety, 5000);
+                };
 
             function testRadar() {
               let el = document.getElementById('radar-val');
@@ -283,14 +304,14 @@ void configWebServer(AsyncWebServer &server) {
               fetch('/diag')
               .then(res => res.json())
               .then(data => {
-				// 1. Display of status on Diagnostic page
+				        // 1. Display of status on Diagnostic page
                 document.getElementById('diag-cam').innerText = data.camera ? "OK (PSRAM OK)" : "KO (No PSRAM)";
                 document.getElementById('diag-sd').innerText = data.sd ? "OK" : "KO";
                 document.getElementById('diag-mpu').innerText = data.mpu ? "OK" : "KO";
                 document.getElementById('diag-sht').innerText = data.sht40 ? "OK" : "KO";
                 document.getElementById('diag-radar').innerText = data.radar ? "OK" : "KO";
 
-				// 2. Access management						
+				        // 2. Access management						
                 let btnObs = document.getElementById('nav-obs');
                 let btnExp = document.getElementById('nav-expl');
                 let btnGal = document.getElementById('nav-gallery');
@@ -298,21 +319,94 @@ void configWebServer(AsyncWebServer &server) {
                 let sensorTemp = document.getElementById('temp');
                 let sensorHum = document.getElementById('hum');
 
-				// Observation needs Camera & SD card											 
-                btnObs.disabled = (!data.camera || !data.sd);
-				// Gallery needs SD	card						  
-                btnGal.disabled = (!data.sd);
+                // 3. Battery elements
+                let batEl = document.getElementById('nav-battery');
+                let unknownWarning = document.getElementById('battery-unknown-warning');
+                let lowWarning = document.getElementById('battery-low-warning');
+                let lockBySafety = data.batteryLowSafety;
 
-				// --- Dynamic control of stabilisation button / motors mode ---																	  
+				        // Observation needs power, Camera & SD card											 
+                btnObs.disabled = lockBySafety || (!data.camera || !data.sd);
+                // Exploration needs power
+                btnExp.disabled = lockBySafety;
+				        // Gallery needs power & SD	card						  
+                btnGal.disabled = lockBySafety || (!data.sd);
+
+                // Battery power information
+                if (!data.statusADS1115) {
+                  if (batEl) {
+                    batEl.style.background = "#222";
+                  }
+                  let vSpan = document.getElementById('voltage');
+                  let pSpan = document.getElementById('BatPercent');
+                  if (vSpan) {
+                    vSpan.innerText = "--";
+                    vSpan.style.color = "#aaa";
+                  }
+                  if (pSpan) {
+                    pSpan.innerText = "--%";
+                    pSpan.style.color = "#aaa";
+                  }
+                  if (unknownWarning) unknownWarning.style.display = 'block';
+                  } else {
+                  if (unknownWarning) unknownWarning.style.display = 'none';
+                  if (batEl) {
+                    batEl.style.background = "#222";
+                  }
+                  
+                  let vSpan = document.getElementById('voltage');
+                  let pSpan = document.getElementById('BatPercent');
+                  
+                  if (vSpan) {
+                    vSpan.innerText = data.batteryVoltage.toFixed(2);
+                    vSpan.style.color = "#ffffff";
+                  }
+                  
+                  if (pSpan) {
+                    pSpan.innerText = data.batteryPercent + "%";
+                    
+                    // Color depend on battery percentage
+                    if (data.batteryPercent >= 51) {
+                      pSpan.style.background = "#27ae60"; // Green
+                      pSpan.style.color = "white";
+                    } else if (data.batteryPercent >= 31) {
+                      pSpan.style.background = "#f39c12"; // Yellow
+                      pSpan.style.color = "black";
+                    } else if (data.batteryPercent >= 16) {
+                      pSpan.style.background = "#e67e22"; // Orange
+                      pSpan.style.color = "white";
+                    } else {
+                      pSpan.style.background = "#d9534f"; // Red
+                      pSpan.style.color = "white";
+                    }
+                    
+                    pSpan.style.padding = "2px 5px";
+                    pSpan.style.borderRadius = "3px";
+                  }
+                }
+
+                if (lowWarning) {
+                  lowWarning.style.display = lockBySafety ? 'block' : 'none';
+                }
+
+                // If safetylock, Diag page is forced
+                if (lockBySafety) {
+                  let activeView = document.querySelector('.view.active');
+                  if (activeView && activeView.id !== 'view-diagnostic') {
+                    navigateTo('diagnostic', 'diagnostic');
+                  }
+                }
+
+				        // --- Dynamic control of stabilisation button / motors mode ---																	  
                 let btnMotorsMode = document.getElementById('btn-motors-mode');
                 if (btnMotorsMode) {
                   if (!data.mpu) {
-					// If MPU KO : locking button in Safety : motors only																	
+					          // If MPU KO : locking button in Safety : motors only																	
                     btnMotorsMode.innerText = "Safety : Motors only";
                     btnMotorsMode.disabled = true;
                     btnMotorsMode.style.background = "#555";
                   } else {
-					// If MPU OK : button usable and show real state
+					          // If MPU OK : button usable and show real state
                     btnMotorsMode.disabled = false;
                     if (data.modeEquilibrium) {
                       btnMotorsMode.innerText = "Stabilisation : ON";
@@ -324,7 +418,7 @@ void configWebServer(AsyncWebServer &server) {
                   }
                 }
 
-				// If SHT40 KO -> Hide value box														 
+				        // If SHT40 KO -> Hide value box														 
                 if (data.sht40) {																										 
                   sensorTemp.classList.remove('error-text');
                   sensorHum.classList.remove('error-text');
@@ -335,7 +429,7 @@ void configWebServer(AsyncWebServer &server) {
                   sensorHum.classList.add('error-text');
                 }
 
-				// If Radar KO or no value -> warning on Exploration page									
+				        // If Radar KO or no value -> warning on Exploration page									
                 let radarWarning = document.getElementById('radar-warning');
                 if (radarWarning) {
                   radarWarning.style.display = data.radar ? 'none' : 'block';
@@ -362,6 +456,8 @@ void configWebServer(AsyncWebServer &server) {
             function toggleStream() {
               let activeView = document.querySelector('.view.active').id;
               if (activeView !== 'view-exploration') return;
+              let btnStream = document.getElementById('btn-stream');
+              if (btnStream && btnStream.disabled) return;
               let img = document.getElementById('videoStream');
               if (streamActive) {
                 streamActive = false;
@@ -376,20 +472,20 @@ void configWebServer(AsyncWebServer &server) {
               if (!streamActive) return;
 
               let img = document.getElementById('videoStream');
-			  // Temporary frame to load framework
+			        // Temporary frame to load framework
               let tempImg = new Image();
               
               tempImg.onload = function() {
                 if (!streamActive) return;
-				// Display of frame					   
+				        // Display of frame					   
                 img.src = tempImg.src;
-				// New frame				 
+				        // New frame				 
                 setTimeout(loadNextFrame, 10);
               };
 
               tempImg.onerror = function() {
                 if (!streamActive) return;
-				// If failed, break before requesting new frame
+				        // If failed, break before requesting new frame
                 setTimeout(loadNextFrame, 200);
               };														   
               tempImg.src = "/snapshot?t=" + new Date().getTime();
@@ -417,7 +513,7 @@ void configWebServer(AsyncWebServer &server) {
               document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
               document.getElementById('view-' + viewName).classList.add('active');
 
-			  // --- Reset state "Select all" ---													   
+			        // --- Reset state "Select all" ---													   
               allSelected = false;
               let btnToggle = document.getElementById('btn-toggle-all');
               if (btnToggle) btnToggle.innerText = "Select all";
@@ -429,12 +525,72 @@ void configWebServer(AsyncWebServer &server) {
               streamActive = false;
               img.src = "";
 
-			  // Hiding video if on Diagnostic or Gallery page
+			        // Hiding video if on Diagnostic or Gallery page
               if (viewName === 'files' || viewName === 'diagnostic') {
                 if (videoContainer) videoContainer.style.display = 'none';
-                if (viewName === 'files') loadFileList(); 
+														  
               } else {
                 if (videoContainer) videoContainer.style.display = 'block';
+              }
+            }
+
+            async function navigateTo(viewName, endpointName) {
+              switchView(viewName);
+              verifyDiagAndSafety();
+
+              try {
+                let response = await fetch('/' + endpointName);
+                let data = await response.json();
+
+                if (endpointName === 'diagnostic') {
+                  verifyDiagAndSafety();
+                } 
+                else if (endpointName === 'observation') {
+                  let btnHd = document.getElementById('btn-hd');
+                  let btnAstro = document.getElementById('btn-astro');
+                  let available = data.camera && data.sd;
+                  if (btnHd) btnHd.disabled = !available;
+                  if (btnAstro) btnAstro.disabled = !available;
+                } 
+                else if (endpointName === 'exploration') {
+                  let btnMotorsMode = document.getElementById('btn-motors-mode');
+                  let radarWarning = document.getElementById('radar-warning');
+                  let btnStream = document.getElementById('btn-stream');
+
+                  if (btnStream) {
+                    btnStream.disabled = !data.camera; // Locking stream if camera not available
+                  }
+
+                  if (btnMotorsMode) {
+                    if (!data.mpu) {
+                      btnMotorsMode.innerText = "Safety : Motors only";
+                      btnMotorsMode.disabled = true;
+                      btnMotorsMode.style.background = "#555";
+                    } else {
+                      btnMotorsMode.disabled = false;
+                      if (data.modeEquilibrium) {
+                        btnMotorsMode.innerText = "Stabilisation : ON";
+                        btnMotorsMode.style.background = "#27ae60";
+                      } else {
+                        btnMotorsMode.innerText = "Stabilisation : OFF";
+                        btnMotorsMode.style.background = "#e67e22";
+                      }
+                    }
+                  }
+                  if (radarWarning) {
+                    radarWarning.style.display = data.radar ? 'none' : 'block';
+                  }
+                } 
+                else if (endpointName === 'gallery') {
+                  if (data.sd) {
+                    loadFileList();
+                  } else {
+                    let listDiv = document.getElementById('file-list');
+                    if (listDiv) listDiv.innerHTML = "<p class='error-text'>SD card not available</p>";
+                  }
+                }
+              } catch (err) {
+                console.error("Sync error for " + endpointName, err);
               }
             }
 
@@ -446,7 +602,7 @@ void configWebServer(AsyncWebServer &server) {
               lockingNavigation(true);
 
               try {
-				// 1. Send capture request with profil
+				        // 1. Send capture request with profil
                 let response = await fetch('/capture?type=' + type);
                 if (!response.ok) {
                   let errText = await response.text();
@@ -454,22 +610,22 @@ void configWebServer(AsyncWebServer &server) {
                   return;
                 }
 
-				// 2. Active waiting for ESP32 to finish writing on SD card (via /status)																		   
+				        // 2. Active waiting for ESP32 to finish writing on SD card (via /status)																		   
                 await waitForTaskCompletion();
-				// 3. Update Gallery
+				        // 3. Update Gallery
                 loadFileList();
                 console.log("[UI] Capture " + type.toUpperCase() + " finished.");
 
               } catch (err) {
                 console.error("Network error :", err);
               } finally {
-				// 4. Giving back interface								
+				        // 4. Giving back interface								
                 if (btn) btn.style.pointerEvents = 'auto';
                 lockingNavigation(false);
               }
             }
 
-			// Polling function for ESP32 state
+			      // Polling function for ESP32 state
             function waitForTaskCompletion() {
               return new Promise((resolve) => {
                 let checkInterval = setInterval(async () => {
@@ -524,7 +680,7 @@ void configWebServer(AsyncWebServer &server) {
                 `;
                 listDiv.appendChild(controlsDiv);
 
-				// Generating files row with check box and file name
+				        // Generating files row with check box and file name
                 files.forEach(file => {
                   let row = document.createElement('div');
                   row.className = 'file-row';
@@ -708,7 +864,7 @@ void configWebServer(AsyncWebServer &server) {
       while (file) {
         if (!file.isDirectory()) {
           String fileName = String(file.name());
-          if (fileName.endsWith(".jpg")) {
+          if (fileName.endsWith(".jpg")){
             if (!first) json += ",";
             json += "\"" + fileName + "\"";
             first = false;
@@ -838,25 +994,46 @@ void configWebServer(AsyncWebServer &server) {
     request->send(200, "application/json", json);
   });
 
-  // 11. Endpoint modes manager
+  // 11. Endpoint modes manager with tailored JSON responses
   server.on("/diagnostic", HTTP_GET, [](AsyncWebServerRequest *request){
     enterModeDiagnostic();
-    request->send(200, "text/plain", "Mode Diagnostic activated");
+    String json = "{";
+    json += "\"camera\":" + String(statusCamera ? "true" : "false") + ",";
+    json += "\"sd\":" + String(statusSD ? "true" : "false") + ",";
+    json += "\"mpu\":" + String(statusMPU ? "true" : "false") + ",";
+    json += "\"sht40\":" + String(statusSHT40 ? "true" : "false") + ",";
+    json += "\"radar\":" + String(statusRadar ? "true" : "false") + ",";
+    json += "\"modeEquilibrium\":" + String(modeEquilibrium ? "true" : "false");
+    json += "}";
+    request->send(200, "application/json", json);
   });
 
   server.on("/observation", HTTP_GET, [](AsyncWebServerRequest *request){
     enterModeObservation();
-    request->send(200, "text/plain", "Mode Observation activated");
+    String json = "{";
+    json += "\"camera\":" + String(statusCamera ? "true" : "false") + ",";
+    json += "\"sd\":" + String(statusSD ? "true" : "false");
+    json += "}";
+    request->send(200, "application/json", json);
   });
 
   server.on("/exploration", HTTP_GET, [](AsyncWebServerRequest *request){
     enterModeExploration();
-    request->send(200, "text/plain", "Mode Exploration activated");
+    String json = "{";
+    json += "\"camera\":" + String(statusCamera ? "true" : "false") + ",";
+    json += "\"modeEquilibrium\":" + String(modeEquilibrium ? "true" : "false") + ",";
+    json += "\"mpu\":" + String(statusMPU ? "true" : "false") + ",";
+    json += "\"radar\":" + String(statusRadar ? "true" : "false");
+    json += "}";
+    request->send(200, "application/json", json);
   });
   
   server.on("/gallery", HTTP_GET, [](AsyncWebServerRequest *request){
     enterModeGallery();
-    request->send(200, "text/plain", "Mode Gallery activated");
+    String json = "{";
+    json += "\"sd\":" + String(statusSD ? "true" : "false");
+    json += "}";
+    request->send(200, "application/json", json);
   });
 
 
@@ -869,8 +1046,6 @@ void configWebServer(AsyncWebServer &server) {
   // 13. Endpoint for motors management
   server.on("/toggleMotors", HTTP_GET, [](AsyncWebServerRequest *request){
     modeEquilibrium = !modeEquilibrium;
-    Serial.print("[WEB] Equilibrium mode : ");
-    Serial.println(modeEquilibrium ? "ACTIVE" : "INACTIVE");
     request->send(200, "text/plain", modeEquilibrium ? "ON" : "OFF");
   });
 

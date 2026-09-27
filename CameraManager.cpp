@@ -144,9 +144,9 @@ bool getPhoto(ProfilCamera profil) {
   cameraInit(PROFIL_STANDARD);
   
   if (saveStatus) {
-    Serial.println("[SYSTEM] Screenshot successful.");
+    //Serial.println("[SYSTEM] Screenshot successful.");
   } else {
-    Serial.println("[SYSTEM] Failed screenshot (SD write error).");
+    //Serial.println("[SYSTEM] Failed screenshot (SD write error).");
   }
 
   return saveStatus;
@@ -155,14 +155,14 @@ bool getPhoto(ProfilCamera profil) {
 bool saveImageSD(String prefixe) {
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) {
-    Serial.println("[CAMERA] Failed screenshot.");
+    //Serial.println("[CAMERA] Failed screenshot.");
     cameraInit(PROFIL_STANDARD); // Reset to QVGA
     return false;
   }
   String filePath = "/" + prefixe + "_" + String(millis()) + ".jpg";  
   File imageSD = SD.open(filePath.c_str(), FILE_WRITE);
   if (!imageSD) {
-    Serial.println("[SD] Access denied.");
+    //Serial.println("[SD] Access denied.");
     esp_camera_fb_return(fb);
     cameraInit(PROFIL_STANDARD); // Reset to QVGA
     return false;
@@ -172,7 +172,7 @@ bool saveImageSD(String prefixe) {
   yield();
   imageSD.close();
 
-  Serial.printf("[SD] File %s saved - Size : %u octets\n", prefixe.c_str(), fb->len);
+  //Serial.printf("[SD] File %s saved - Size : %u octets\n", prefixe.c_str(), fb->len);
   esp_camera_fb_return(fb);
   return true;
 }

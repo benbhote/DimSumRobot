@@ -6,6 +6,7 @@ bool statusSD = false;
 bool statusMPU = false;
 bool statusSHT40 = false;
 bool statusRadar = false;
+bool statusADS1115 = false;
 
 //Variables to display data on webserver
 float anglePitch = 0.0;
@@ -31,6 +32,66 @@ bool emergencyStop = false;
 
 // Filter variable
 static unsigned long filterTimestamp = 0;
+
+// --- ADS1115 functions
+bool initADS1115() {
+  Wire.beginTransmission(ADS1115_ADDR);
+  Wire.write(0x01); // Configuration register
+  Wire.write(0xC2); // MSB: OS=1, MUX=100 (AIN0), PGA=001 (±4.096V), MODE=0 (Continuous conversion mode)
+  Wire.write(0x83); // LSB: DR=100 (128 SPS), comparator disabled
+  if (Wire.endTransmission() != 0) {
+    statusADS1115 = false;
+    Serial.println("[ADS1115] I2C communication failed!");
+    return false;
+  }
+  statusADS1115 = true;
+  Serial.println("[ADS1115] Initialized successfully in continuous mode.");
+  return true;
+}
+
+bool readA0BatteryADS1115(float &voltage, int &percent) {
+  Wire.beginTransmission(ADS1115_ADDR);
+  Wire.write(0x00);
+  if (Wire.endTransmission(false) != 0) {
+    statusADS1115 = false;
+    return false;
+  }
+
+  uint8_t bytesReceived = Wire.requestFrom(ADS1115_ADDR, 2);
+  if (bytesReceived != 2) {
+    statusADS1115 = false;
+    return false;
+  }
+
+  int16_t raw = (Wire.read() << 8) | Wire.read();
+  
+  // Resolution for ±4.096V gain (32768 steps) -> 0.125 mV per bit
+  float measuredV = (float)raw * 0.000125f;
+  if (measuredV < 0.0f) measuredV = 0.0f;
+
+  // Apply hardware voltage divider ratio (e.g., 2.0 for a 1:1 divider)
+  const float VOLTAGE_DIVIDER_RATIO = 2.0f; 
+  voltage = measuredV * VOLTAGE_DIVIDER_RATIO;
+
+  // Battery percentage calculation (example for a 1S LiPo battery: 3.0V empty, 4.2V full
+  const float V_MIN = 3.0f;
+  const float V_MAX = 4.2f;
+  percent = (int)((voltage - V_MIN) / (V_MAX - V_MIN) * 100.0f);
+  percent = constrain(percent, 0, 100);
+
+  statusADS1115 = true;
+  batteryVoltage = voltage;
+  batteryPercent = percent;
+
+  // Safety: trigger if battery voltage is <= 3.1V
+  if (voltage <= 3.1f) {
+    batteryLowSafety = true;
+  } else {
+    batteryLowSafety = false;
+  }
+
+  return true;
+}
 
 // --- SHT40 sensor function ---
 bool readSensorSHT40(float &temp, float &hum) {
@@ -160,7 +221,7 @@ bool initMPU6050(bool forceReset) {
     Wire.write(0x6B); // PWR_MGMT_1 register
     Wire.write(0x80); // Internal hardware reboot command
     Wire.endTransmission();
-    delay(100);       // Delay to allow internal reboot
+    vTaskDelay(pdMS_TO_TICKS(100));       // Delay to allow internal reboot
   }
 
   // Classical wake up sequence
@@ -179,6 +240,12 @@ bool initMPU6050(bool forceReset) {
   Wire.write(0x00); 
   Wire.endTransmission();
 
+  // Register configuration of GYRO_RATE (±250°/s)
+  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.write(0x1B); 
+  Wire.write(0x00); 
+  Wire.endTransmission();
+
   statusMPU = true;
   Serial.println("[MPU6050] Successful initialization.");
   return true;
@@ -193,9 +260,11 @@ void checkAndGetMPU() {
   } 
   else {
     consecutiveFailMPU++;
+    //Even wihtout new values, the filter will work with the last usable values
+    getFilteredPitch();
     
-    // If no value are send during 5 cycles (~50ms)
-    if (consecutiveFailMPU > 5) {
+    // If no value are send during 15 cycles (~150ms)
+    if (consecutiveFailMPU > 15) {
       Serial.println("⚠️ MPU6050 communication lost, reset attempt...");
       
       if (initMPU6050(true)) {
@@ -235,20 +304,30 @@ bool readMPUData() {
   }
 
   // 1. Accelerometer data reading
-  currentAx = Wire.read() << 8 | Wire.read();
-  currentAy = Wire.read() << 8 | Wire.read();
-  currentAz = Wire.read() << 8 | Wire.read();
-  currentAx = -currentAx; //Because the MPU is installed vertically, data needs to be corrected
+  int16_t tempAx = (Wire.read() << 8) | Wire.read();
+  int16_t tempAy = (Wire.read() << 8) | Wire.read();
+  int16_t tempAz = (Wire.read() << 8) | Wire.read();
 
   // 2. Temp data ignored (2 octets)
   Wire.read(); 
   Wire.read();
 
   // 3. Gyroscope data reading
-  currentGx = (Wire.read() << 8) | Wire.read();
-  currentGy = (Wire.read() << 8) | Wire.read();
-  currentGz = (Wire.read() << 8) | Wire.read();
-  currentGx = -currentGx; //Because the MPU is installed vertically, data needs to be corrected
+  int16_t tempGx = (Wire.read() << 8) | Wire.read();
+  int16_t tempGy = (Wire.read() << 8) | Wire.read();
+  int16_t tempGz = (Wire.read() << 8) | Wire.read();
+
+  if (tempAx == 0 && tempAy == 0 && tempAz == 0) {
+    statusMPU = false;
+    return false; 
+  }
+
+  currentAx = -tempAx; //Because the MPU is installed vertically, data needs to be corrected
+  currentAy = tempAy;
+  currentAz = tempAz;
+  currentGx = -tempGx; //Because the MPU is installed vertically, data needs to be corrected
+  currentGy = tempGy;
+  currentGz = tempGz;
 
   statusMPU = true;
   return true;
@@ -261,15 +340,22 @@ void getRoll() {
   angleRoll = atan2((float)currentAy, (float)currentAx) * 180.0 / PI;
 }
 
+void resetFilterTimestamp() {
+  filterTimestamp = micros();
+}
+
 void getFilteredPitch() {
   // Converting delta temps (dt) in seconds
-  unsigned long actualTime = millis();
-  float dt = (actualTime - filterTimestamp) / 1000.0;
+  unsigned long actualTime = micros();
+  float dt = (actualTime - filterTimestamp) / 1000000.0;
   if (dt <= 0.0) dt = 0.01; // Safety to avoid dividing by 0
   filterTimestamp = actualTime;
 
-  // Brut angle brut from accelerometer
-  float angleAccel = atan2((float)currentAz, (float)currentAx) * 180.0 / PI;
+  // Normalized angle on 3 axis from accelerometer
+  float az = (float)currentAz;
+  float ax = (float)currentAx;
+  float ay = (float)currentAy;
+  float angleAccel = atan2(az, sqrt(ax * ax + ay * ay)) * RAD_TO_DEG;
 
   // Gyroscope angular velocity converted to °/s 
   float gyroRate = (float)currentGz / 131.0; // Sensibility range ±250°/s

@@ -27,6 +27,7 @@ extern bool statusSD;
 extern bool statusMPU;
 extern bool statusSHT40;
 extern bool statusRadar;
+extern bool statusADS1115;
 
 // --- Motors pins ---
 //Not enough pin to drive StandBy of TB6612FNG
@@ -45,6 +46,7 @@ const int pinRadar = 42; //MTMS - D11
 // --- I2C addresses---
 const uint8_t MPU6050_ADDR = 0x68;
 const uint8_t SHT40_ADDR = 0x44;
+const uint8_t ADS1115_ADDR = 0x48;
 
 // --- Moving controls variables
 extern bool modeEquilibrium;
@@ -53,6 +55,11 @@ extern int consigneThrottle;
 extern int consigneSteering;
 extern TaskHandle_t radarTaskHandle;
 extern unsigned long timestampJoystick;
+
+// --- Shared variables (Battery)
+extern float batteryVoltage;
+extern int batteryPercent;
+extern bool batteryLowSafety;
 
 // --- Shared variables (T° and Humidity) ---
 extern float temperatureData;

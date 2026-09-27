@@ -21,6 +21,13 @@ volatile TaskQueue taskRequested = NO_TASK;
 // Default mode
 Mode currentMode = GHOST;
 
+// Shared variables to store data from Battery
+float batteryVoltage = 0.0;
+int batteryPercent = 0;
+unsigned long lastTimeBatCheck = 0;
+bool batteryLowSafety = false;
+const unsigned long INTERVAL_BAT_MS = 5000; //Time between two reading of battery power
+
 // Shared variables to store data from SHT40
 float temperatureData = 0.0;
 float humidityData = 0.0;
@@ -33,6 +40,8 @@ static unsigned long startTempo = 0;
 static bool activeTempo = false;
 static bool motorsOff = true;
 bool modeEquilibrium = false;
+const int OFFSET_MIN = 35;
+const int PWM_MAX = 200;
 int consigneThrottle = 0;
 int consigneSteering = 0;
 TaskHandle_t radarTaskHandle = NULL;
@@ -50,6 +59,7 @@ void setup() {
   // 1. Hardware modules initialization
   initMotorsPins();
   initCameraDefault();
+  initADS1115();
   initSDCard();
   initRadar();
   initMPU6050();
@@ -84,6 +94,7 @@ void setup() {
   );
 
   enterModeGhost();
+  playDualMelody(bootMelody, bootMelodyLength); // Boot song
 }
 
 void loop() {
@@ -102,22 +113,38 @@ void loop() {
     //Shutting off motors (again maybe) to be sure the robot is not moving
     stopMotors();
     enterModeGhost();
+    playDualMelody(descendingScale,descendingScaleLength); //Song when entering GHOST mode
   }
 
-  // --- SHT40 management ---
-  if (currentMode != GHOST && (millis() - lastTimeSHT > INTERVAL_SHT_MS)) {
-    lastTimeSHT = millis();
-    if (readSensorSHT40(temperatureData, humidityData)) {
-      Serial.print("[SHT40] Temp : "); Serial.print(temperatureData); Serial.println(" °C | ");
-      Serial.print("Humidity : "); Serial.print(humidityData); Serial.println(" %");
+    // --- Battery management ---
+  if (currentMode != GHOST && (millis() - lastTimeBatCheck > INTERVAL_BAT_MS)) {
+    lastTimeBatCheck = millis();
+    readA0BatteryADS1115(batteryVoltage, batteryPercent);
+    if (batteryLowSafety) {
+      if (currentMode != DIAGNOSTIC){
+        stopMotors();
+        enterModeDiagnostic();
+        events.send("battery_low_safety", "system_state", millis());
+        playDualMelody(lowBatteryAlert,lowBatteryAlertLength); //Song alert for low battery
+      }
     }
+  }
+
+  // --- SHT40 & battery management ---
+  bool blockSHT = (modeEquilibrium && (!motorsOff || activeTempo)); //Exist condition to avoid I2C bus interference
+  if (currentMode != GHOST && !blockSHT && (millis() - lastTimeSHT > INTERVAL_SHT_MS)) {
+    lastTimeSHT = millis();
+    readSensorSHT40(temperatureData, humidityData);
+    //Serial.print("[SHT40] Temp : "); Serial.print(temperatureData); Serial.println(" °C | ");
+    //Serial.print("Humidity : "); Serial.print(humidityData); Serial.println(" %");
   }
 
   switch (currentMode) {
     case GHOST:
       if (nbClients > 0) {
         Serial.println("Connection established ! Leaving GHOST mode.");
-        enterModeDiagnostic(); 
+        enterModeDiagnostic();
+        playDualMelody(ascendingScale,ascendingScaleLength); //Song when leaving GHOST mode 
       } else {
         delay(500); 
       }
@@ -142,15 +169,25 @@ void loop() {
 
   // Heavy requests management
   if (isRequesting && taskRequested != NO_TASK) {
+    bool photoSuccess = false; //Variable to return state of photo's save to play correct song
+    
     switch (taskRequested) {
       case CAPTURE_ASTRO:
-        getPhoto(PROFIL_ASTRO_QXGA);
+        photoSuccess = getPhoto(PROFIL_ASTRO_QXGA);
         break;              
       case CAPTURE_HD:
-        getPhoto(PROFIL_HD_QXGA);
+        photoSuccess = getPhoto(PROFIL_HD_QXGA);
         break;              
       default:
         break;
+    }
+    //Managing result of photo capture
+    if (taskRequested == CAPTURE_ASTRO || taskRequested == CAPTURE_HD) {
+      if (photoSuccess) {
+        playDualMelody(pictureTaken, pictureTakenLength); // Photo taken song
+      } else {
+        events.send("photo_failed", "system_state", millis()); // Fail event
+      }
     }
     // Finalizing task
     taskRequested = NO_TASK;
@@ -232,11 +269,6 @@ void radarTask(void *pvParameters) {
     // 2. When awake, calculate distance each 50ms and update flag obstacle
     while (getMoveOrder && statusRadar) {
       distanceObstacle = getRadarDistanceStr();
-      if (distanceObstacle > 0 && distanceObstacle < 30) {
-        dangerObstacle = true;
-      } else { 
-        dangerObstacle = false;
-      }
       vTaskDelay(pdMS_TO_TICKS(50));
     }
 
@@ -253,10 +285,13 @@ void cycleExplorationTask(void *pvParameters) {
         // 1. Task sleeping until getting a signal to wake up
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-        // 2. When awake, first set PID timing
+        // 2. Reset FilterTimestamp to avoid absurd value due to long period between robot boot and call of the function
+        resetFilterTimestamp();
+
+        // 3. When awake, first set PID timing
         xLastWakeTime = xTaskGetTickCount();
 
-        // 3. To maintain equilibrium, loop at 100Hz frequency
+        // 4. To maintain equilibrium, loop at 100Hz frequency
         while (modeEquilibrium) {
             cycleEquilibrium();
 
@@ -272,37 +307,52 @@ void cycleExplorationTask(void *pvParameters) {
 }
 
 int manageThrottle(int inputThrottle) {
-    const int OFFSET_MIN = 35;
-    const int PWM_MAX = 200;
     const int maxInputRange = PWM_MAX - OFFSET_MIN;
     int targetThrottle = 0;
+    int baseThrottle = 0;
 
-    // 1. Deadband management
-    if (abs(inputThrottle) > 2) {
-        int sign = (inputThrottle > 0) ? 1 : -1;
-        
-        // Normalized input between 0.0 and 1.0
-        float normalizedInput = (float)abs(inputThrottle) / (float)maxInputRange;
-        if (normalizedInput > 1.0f) normalizedInput = 1.0f;
+    if(!modeEquilibrium) {
+      // Manual cycle
+      // 1. Motor deadband management
+      if (abs(inputThrottle) > 2) {
+          int sign = (inputThrottle > 0) ? 1 : -1;
+          
+          // Normalized input between 0.0 and 1.0
+          float normalizedInput = (float)abs(inputThrottle) / (float)maxInputRange;
+          if (normalizedInput > 1.0f) normalizedInput = 1.0f;
 
-        // Logarithmic function application (k = curvature parameter)
-        float k = 5.0f; 
-        float logValue = log(1.0f + k * normalizedInput) / log(1.0f + k);
+          // Logarithmic function application (k = curvature parameter)
+          float k = 5.0f; 
+          float logValue = log(1.0f + k * normalizedInput) / log(1.0f + k);
 
-        // Back to scale with integration of offset value
-        int scaledMagnitude = OFFSET_MIN + (int)(logValue * (PWM_MAX - OFFSET_MIN));
-        
-        targetThrottle = sign * scaledMagnitude;
-    } else {
-        targetThrottle = 0;
+          // Back to scale with integration of offset value
+          int scaledMagnitude = OFFSET_MIN + (int)(logValue * (PWM_MAX - OFFSET_MIN));
+          
+          targetThrottle = sign * scaledMagnitude;
+      } else {
+          targetThrottle = 0;
+      }
+
+      // 2. Variation limiter (Smoothing / MaxStep)
+      static int previousBaseThrottle = 0;
+      const int maxStep = 15; 
+      int delta = constrain(targetThrottle - previousBaseThrottle, -maxStep, maxStep);
+      baseThrottle = previousBaseThrottle + delta;
+      previousBaseThrottle = baseThrottle; 
     }
-
-    // 2. Variation limiter (Smoothing / MaxStep)
-    static int previousBaseThrottle = 0;
-    const int maxStep = 15; 
-    int delta = constrain(targetThrottle - previousBaseThrottle, -maxStep, maxStep);
-    int baseThrottle = previousBaseThrottle + delta;
-    previousBaseThrottle = baseThrottle; 
+    else {
+        // Equilibrium cycle
+        if (abs(inputThrottle) > 2) {
+            int sign = (inputThrottle > 0) ? 1 : -1;
+            if (abs(inputThrottle) < OFFSET_MIN) {
+                baseThrottle = sign * OFFSET_MIN;
+            } else {
+                baseThrottle = inputThrottle;
+            }
+        } else {
+            baseThrottle = 0;
+        }
+    }
 
     // 3. PWM safety constrain
     return constrain(baseThrottle, -PWM_MAX, PWM_MAX);
@@ -324,6 +374,7 @@ void cycleEquilibrium () {
   static float sumErrors = 0.0;
   static float previousError = 0.0;
   const float dt = 0.01f; // Fix dt due to 10ms cycle of cycleExplorationTask
+  const float PITCH_OFFSET = -1.8f; //Adjust to reflete the true balanced angle of the robot depending on your MPU's fixation
 
   // MPU read with safety max tilt angle (> 30°)
   checkAndGetMPU();
@@ -347,7 +398,7 @@ void cycleEquilibrium () {
       if (!activeTempo) {
           startTempo = millis();
           activeTempo = true;
-          Serial.println("1 -> Début Sablier");
+          //Serial.println("1 -> Début Sablier");    
       }
 
       if ((millis() - startTempo) >= TIMEOUT_EQUILIBRIUM_MS) {
@@ -355,24 +406,27 @@ void cycleEquilibrium () {
           motorsOff = true;
           activeTempo = false;
           sumErrors = 0.0;
-          Serial.println("2 -> Fin Sablier");
+          //Serial.println("2 -> Fin Sablier");
           return;
       }
   }
 
   // --- PID calculation ---
-  float targetAngle = getMoveOrder ? ((float)consigneThrottle * 0.05f) : 0.0f;
+  float targetAngle = PITCH_OFFSET + (getMoveOrder ? ((float)consigneThrottle * 0.05f) : 0.0f);
   float error = anglePitch - targetAngle;
 
+  //If needed, a deadband angle can be added but it's not recommended for a self-balancing robot
+  //if (abs(error) < 1.0f) error = 0.0f;
+
   sumErrors += error * dt;
-  sumErrors = constrain(sumErrors, -70.0, 70.0); 
+  sumErrors = constrain(sumErrors, -20.0, 20.0); 
 
   float deltaError = (error - previousError) / dt;
   previousError = error;
 
   // PID constants
   const float Kp = 15.0;  // More or less PWM depending on the angle
-  const float Ki = 2.0;   // Builds up strength  if robot get stuck
+  const float Ki = 0.5;   // Builds up strength  if robot get stuck
   const float Kd = 1.5;   // Slow down robot when approaching equilibrium
 
   float realOrder = (Kp * error) + (Ki * sumErrors) + (Kd * deltaError);
@@ -409,14 +463,33 @@ void manageModeExploration() {
       consigneSteering = 0;
       getMoveOrder = false;
       stopMotors();
-      motorsOff = true; // Stop even if equilibrium cycle is active
-      Serial.println("[WATCHDOG] Joystick signal lost : forced stop.");
+      motorsOff = true; // Stop even if equilibrium cycle is active      
   }
 
   // 2. Radar anti collision safety
   if (statusRadar) {
-      if (dangerObstacle && consigneThrottle > 0) {
-        consigneThrottle = 0; 
+      if (distanceObstacle > 0) { // Distance value exploitable
+          if (distanceObstacle < 20) {
+              // Less than 20 cm : only backward allowed
+              if (consigneThrottle > 0) {
+                  consigneThrottle = 0;
+              }
+          } 
+          else if (distanceObstacle < 50) {
+              // Between 20 cm and 50 cm : 30% of PWM max
+              int limitPwm = PWM_MAX * 0.3;
+              if (consigneThrottle > limitPwm) {
+                  consigneThrottle = limitPwm;
+              }
+          } 
+          else if (distanceObstacle < 100) {
+              // Between 50 cm and 1 m : 50% of PWM max
+              int limitPwm = PWM_MAX * 0.5;
+              if (consigneThrottle > limitPwm) {
+                  consigneThrottle = limitPwm;
+              }
+          }
+          // Otherwise, no limit other than PWM max
       }
   }
 
@@ -426,7 +499,7 @@ void manageModeExploration() {
   }
   else {
   // If movement order and equilibrium task asleep, waking up task
-    if (getMoveOrder || activeTempo) {
+    if (getMoveOrder || activeTempo || !motorsOff) {
         if (explorationTaskHandle != NULL) {
             xTaskNotifyGive(explorationTaskHandle);
         }
