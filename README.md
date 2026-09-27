@@ -10,12 +10,13 @@ Nonetheless, the project is still really fun because of all the other dimensions
 - Reading of temperature and humidity
 - Capturing pictures or streaming while in motion
 - Managing the SD card (downloading and deleting pictures)
+- (NEW!) Making sound by using the N20 motors at very low frequency
 
 The 3D printed chassis can be found here : https://www.printables.com/model/1834603-dim-sum-robot
 
 # How does it works :
 All the controls and sensor readings are available on HTML page hosted on a web server run by the ESP32-S3.
-When you first arrive on the page, you will have the status of each sensor and have the option to choose from four different views :
+When you first arrive on the page, you will have the status of each sensor as well as the battery percentage. You get the option to choose from four different views :
 - Diagnostic : Default view when device is connected to the robot whith all sensors states.
 - Observation : The robot remains stationary and you can take picture with the camera.
     - Snapshot : Provides a quick preview without saving the image.
@@ -25,6 +26,12 @@ When you first arrive on the page, you will have the status of each sensor and h
 - Gallery : All saved photos are available here for downloading or deleting.
 
 When no devices are connected to the robot (and only one can be connected at a time), the robot enters "ghost" mode : nothing is activated except the WiFi.
+By using the N20 motors at low frequency, it is possible for the robot to make sound and express itself. For now, the robot will emit a sound when :
+- Boot is finish
+- Leaving GHOST mode
+- Reentering GHOST mode
+- Successfully taking a picture
+- Battery is low
 
 # Hardware :
 - Seeed Studio XIAO ESP32-S3 Sense
@@ -33,6 +40,7 @@ When no devices are connected to the robot (and only one can be connected at a t
 - MT3608 DC-DC boost
 - 2 N20 motors 6V 300 RPM
 - ARCELI GY-521 MPU6050
+- ARCELI ADS1115
 - Grove Ultrasonic Ranger
 - Grove Temperature & Humidity Sensor(SHT40)
 - Battery LiPo 3.7 500mAh 902030
@@ -44,14 +52,16 @@ For the schematic, please consult KiCad folder.
 # Known issues :
 _Important to note that with the current configuration, no more GPIO pin are available to put another sensor (except an I2C one's that will be added on the bus with the MPU and SHT40 sensors)._
 - Microphone available on the sense module isn't activated because its GPIOs are needed elsewhere.
-- Currently, the self-balancing isn't properly working and the robot will move with its bottom touching the floor.
+- Currently, the self-balancing isn't properly tuning. So the robot isn't properly achieving balance for now.
 - If the robot is on for extended period of time (more than 30min I'd say), the warmth emit by the ESP32-S3 is building up inside the chassis and mainly going out through the SHT40 slit and impacting the data read by it.
 - Depending on how well the wheels are fixed, the robot will not go straight forward.
 
 # Next Step :
-- Making the PID loop working properly
-- Adding conditional compilation to adapt the code depending on the components inside the robot
+- Fine tuning of the PID loop to get proper balance
+- Finish designing tracks to get another option instead of the wheel
+- (Maybe) Adding conditional compilation to adapt the code depending on the components inside the robot
 
 # Changelog :
+- 2026-09-27 : Updated the code with battery info on the webview (by using the ADS1115) and using N20 motors to make sound
 - 2026-09-14 : Adding KiCad files
 - 2026-09-06 : Creating the repository
