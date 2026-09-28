@@ -56,8 +56,8 @@ const size_t pictureTakenLength = sizeof(pictureTaken) / sizeof(pictureTaken[0])
 
 //-- Low battery song
 const DualNote lowBatteryAlert[] = {
-    {300, 250, 200},  // D4 (approx.) / B3
-    {200, 150, 400}   // G3 / D#3 (approx.)
+    {349, 294, 150},  // F4 / D4 (approx.)
+    {247, 196, 250}   // B3 / G3
 };
 const size_t lowBatteryAlertLength = sizeof(lowBatteryAlert) / sizeof(lowBatteryAlert[0]);
 

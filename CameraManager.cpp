@@ -31,7 +31,7 @@ bool cameraInit(ProfilCamera profil) {
     cameraActive = false;
     vTaskDelay(pdMS_TO_TICKS(100));
   }
-  
+
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -141,7 +141,7 @@ bool getPhoto(ProfilCamera profil) {
   bool saveStatus = saveImageSD(prefixeFile);
 
   // 4. Back to low quality profil (QVGA) to reduce system workload
-  cameraInit(PROFIL_STANDARD);
+  cameraInit(PROFIL_STANDARD); // Reset to QVGA
   
   if (saveStatus) {
     //Serial.println("[SYSTEM] Screenshot successful.");
@@ -156,7 +156,6 @@ bool saveImageSD(String prefixe) {
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) {
     //Serial.println("[CAMERA] Failed screenshot.");
-    cameraInit(PROFIL_STANDARD); // Reset to QVGA
     return false;
   }
   String filePath = "/" + prefixe + "_" + String(millis()) + ".jpg";  
@@ -164,7 +163,6 @@ bool saveImageSD(String prefixe) {
   if (!imageSD) {
     //Serial.println("[SD] Access denied.");
     esp_camera_fb_return(fb);
-    cameraInit(PROFIL_STANDARD); // Reset to QVGA
     return false;
   }
 
