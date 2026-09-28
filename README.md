@@ -50,7 +50,9 @@ You can consult pin mapping of the ESP32-S3 [here](./PINOUT.md).
 For the schematic, please consult KiCad folder.
 
 # Known issues :
-_Important to note that with the current configuration, no more GPIO pin are available to put another sensor (except an I2C one's that will be added on the bus with the MPU and SHT40 sensors)._
+_Important to note that with the current configuration, no more GPIO pin are available to put another sensor (except an I2C one's that will be added on the bus with the ADS1115, the MPU6050, SHT40 sensors)._
+I'm currently using Arduino IDE 2.3.10 with version 3.3.11 of esp32 package by Espressif Systems (the newer 3.3.12 change something about SRAM/RAM allocation that makes my camera re-init after boot generating a malloc error).
+
 - Microphone available on the sense module isn't activated because its GPIOs are needed elsewhere.
 - Currently, the self-balancing isn't properly tuning. So the robot isn't properly achieving balance for now.
 - If the robot is on for extended period of time (more than 30min I'd say), the warmth emit by the ESP32-S3 is building up inside the chassis and mainly going out through the SHT40 slit and impacting the data read by it.
@@ -62,6 +64,6 @@ _Important to note that with the current configuration, no more GPIO pin are ava
 - (Maybe) Adding conditional compilation to adapt the code depending on the components inside the robot
 
 # Changelog :
-- 2026-09-27 : Updated the code with battery info on the webview (by using the ADS1115) and using N20 motors to make sound
+- 2026-09-28 : Updated the code with battery info on the webview (by using the ADS1115) and using N20 motors to make sound
 - 2026-09-14 : Adding KiCad files
 - 2026-09-06 : Creating the repository
