@@ -51,6 +51,7 @@ For the schematic, please consult KiCad folder.
 
 # Known issues :
 _Important to note that with the current configuration, no more GPIO pin are available to put another sensor (except an I2C one's that will be added on the bus with the ADS1115, the MPU6050, SHT40 sensors)._
+
 I'm currently using Arduino IDE 2.3.10 with version 3.3.11 of esp32 package by Espressif Systems (the newer 3.3.12 change something about SRAM/RAM allocation that makes my camera re-init after boot generating a malloc error).
 
 - Microphone available on the sense module isn't activated because its GPIOs are needed elsewhere.
