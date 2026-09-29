@@ -43,7 +43,7 @@ By using the N20 motors at low frequency, it is possible for the robot to make s
 - ARCELI ADS1115
 - Grove Ultrasonic Ranger
 - Grove Temperature & Humidity Sensor(SHT40)
-- Battery LiPo 3.7 500mAh 902030
+- Battery LiPo Dogcom 1S 3.7 550mAh 150C
 
 You can consult pin mapping of the ESP32-S3 [here](./PINOUT.md).
 
