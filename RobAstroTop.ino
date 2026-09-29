@@ -40,7 +40,7 @@ static unsigned long startTempo = 0;
 static bool activeTempo = false;
 static bool motorsOff = true;
 bool modeEquilibrium = false;
-const int OFFSET_MIN = 35;
+const int OFFSET_MIN = 15;
 const int PWM_MAX = 200;
 int consigneThrottle = 0;
 int consigneSteering = 0;
@@ -125,6 +125,7 @@ void loop() {
         stopMotors();
         enterModeDiagnostic();
         events.send("battery_low_safety", "system_state", millis());
+        Serial.println("Warning : Low battery.");
         playDualMelody(lowBatteryAlert,lowBatteryAlertLength); //Song alert for low battery
       }
     }
@@ -374,7 +375,8 @@ void cycleEquilibrium () {
   static float sumErrors = 0.0;
   static float previousError = 0.0;
   const float dt = 0.01f; // Fix dt due to 10ms cycle of cycleExplorationTask
-  const float PITCH_OFFSET = -1.8f; //Adjust to reflete the true balanced angle of the robot depending on your MPU's fixation
+  //Adjust to reflete the angle of gravitational equilibrium depending on your MPU's geometric horizontal and mass repartition inside the chassis
+  const float PITCH_OFFSET = -1.5f; // MPU's geometric horizontal = -3.5° and more mass on the front
 
   // MPU read with safety max tilt angle (> 30°)
   checkAndGetMPU();
@@ -389,8 +391,18 @@ void cycleEquilibrium () {
 
   // Timer management (timeout of 3 secondes without moving order)
   if (getMoveOrder) {
+      // Swing-up to help the robot get in balance
+      static int swingUpCounter = 0;
+      if (motorsOff) {
+          swingUpCounter = 5;
+          motorsOff = false;
+      }
+      if (swingUpCounter > 0) {
+          swingUpCounter--;
+          controlMotorsExploration(200, 0);
+          return;
+      }
       activeTempo = false;
-      motorsOff = false;
   } 
   else {
       if (motorsOff) return;
@@ -398,6 +410,8 @@ void cycleEquilibrium () {
       if (!activeTempo) {
           startTempo = millis();
           activeTempo = true;
+          sumErrors = 0.0; // Reset the integral when the tempo start
+          previousError = 0.0; // Reset this one too to avoid discontinuity in the derivative term
           //Serial.println("1 -> Début Sablier");    
       }
 
@@ -425,17 +439,12 @@ void cycleEquilibrium () {
   previousError = error;
 
   // PID constants
-  const float Kp = 15.0;  // More or less PWM depending on the angle
-  const float Ki = 0.5;   // Builds up strength  if robot get stuck
+  const float Kp = 30.0;  // More or less PWM depending on the angle
+  const float Ki = 0.0;   // Builds up strength  if robot get stuck
   const float Kd = 1.5;   // Slow down robot when approaching equilibrium
 
   float realOrder = (Kp * error) + (Ki * sumErrors) + (Kd * deltaError);
   int rawThrottle = -(int)realOrder; 
-
-  // PID specificity : reset integrator if throttle in deadzone
-  if (rawThrottle >= -2 && rawThrottle <= 2) {
-      sumErrors = 0.0;
-  }
   
   // Unified processing application (Offset + Smoothing + PWM safety constrain)
   int baseThrottle = manageThrottle(rawThrottle);
@@ -475,14 +484,14 @@ void manageModeExploration() {
                   consigneThrottle = 0;
               }
           } 
-          else if (distanceObstacle < 50) {
+          else if (distanceObstacle < 45) {
               // Between 20 cm and 50 cm : 30% of PWM max
               int limitPwm = PWM_MAX * 0.3;
               if (consigneThrottle > limitPwm) {
                   consigneThrottle = limitPwm;
               }
           } 
-          else if (distanceObstacle < 100) {
+          else if (distanceObstacle < 70) {
               // Between 50 cm and 1 m : 50% of PWM max
               int limitPwm = PWM_MAX * 0.5;
               if (consigneThrottle > limitPwm) {

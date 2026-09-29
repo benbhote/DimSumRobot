@@ -12,8 +12,6 @@ bool statusADS1115 = false;
 float anglePitch = 0.0;
 float angleRoll = 0.0;
 
-// Due to the orientation of MPU6050 inside the case : ax=gravity, ay=roll (left/right angle) and az=pitch (forward/backward angle)
-
 // Accelerometer variables
 int16_t currentAx = 0;
 int16_t currentAy = 0;
@@ -214,6 +212,7 @@ int getRadarDistanceStr() { //Use of IRS function because pulseIn(pinRadar, HIGH
 }
 
 // --- MPU6050 functions ---
+// Due to the orientation of MPU6050 inside the case : x=yaw/gravity, y=roll (left/right angle) and z=pitch (forward/backward angle).
 bool initMPU6050(bool forceReset) {
   // In case of problem, full reset
   if (forceReset) {
